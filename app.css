@@ -100,8 +100,33 @@ label.check { color: var(--text); }
 /* Document tiles (page-wide) */
 .tiles-wide { display: grid; gap: 1rem; }
 .doc-tile { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1.1rem 1.25rem; display: grid; gap: .7rem; }
+.doc-tile.has-thumb { grid-template-columns: 130px minmax(0, 1fr); column-gap: 1.25rem; align-items: start; }
+.tile-main { display: grid; gap: .7rem; min-width: 0; }
+.thumb {
+  width: 130px; aspect-ratio: 1 / 1.414; padding: 0;
+  display: grid; place-items: center; overflow: hidden;
+  background: #fff; border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.12); cursor: pointer;
+}
+.thumb:hover { border-color: var(--accent); }
+.thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.thumb-fallback { color: #6b7280; font-weight: 600; font-size: .85rem; }
+@media (max-width: 600px) {
+  .doc-tile.has-thumb { grid-template-columns: 76px minmax(0, 1fr); column-gap: .9rem; }
+  .thumb { width: 76px; }
+}
+.title-wrap { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; min-width: 0; }
+.title-wrap h3 { margin: 0; }
+.title-text { overflow-wrap: anywhere; }
+.icon-btn {
+  background: transparent; color: var(--muted); padding: .1rem .4rem; border-radius: 6px;
+  font-size: .95rem; opacity: .55;
+}
+.icon-btn:hover:not(:disabled) { opacity: 1; background: var(--bg); color: var(--accent); }
+.icon-btn:disabled { display: none; }
+.title-input { flex: 1; min-width: 160px; font-weight: 600; }
 .doc-tile header { display: flex; gap: .75rem; align-items: flex-start; flex-wrap: wrap; }
-.doc-tile h3 { flex: 1; min-width: 200px; margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
+.doc-tile h3 { margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
 .doc-tile .actions { display: flex; gap: .4rem; flex-wrap: wrap; }
 .doc-tile .meta { font-size: .8rem; color: var(--muted); margin-top: .15rem; }
 .field-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: .1rem; }

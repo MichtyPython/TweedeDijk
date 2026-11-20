@@ -18,6 +18,7 @@ const P = {
   secrets: 'vault/secrets.bin',
   file: (id) => `vault/files/${id}.bin`,
   summary: (id) => `vault/summaries/${id}.bin`,
+  thumb: (id) => `vault/thumbs/${id}.bin`,
 };
 
 pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -99,8 +100,22 @@ async function docId(bytes) {
 }
 
 // ---------- storage (GitHub API when a token is set, else the static site) ----------
+//
+// GitHub's contents API can return the previous version of a file for a while right after a
+// write, and rejects writes with 409 when the branch moved underneath. So:
+//  - all writes go through one queue (never two commits at once from this browser),
+//  - every write remembers the sha it produced, so a stale read can be recognised,
+//  - conflicts are retried with increasing waits instead of instantly.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const written = new Map();   // path -> { sha, prevSha, data } for files this browser wrote
+let writeChain = Promise.resolve();
+function queued(fn) {
+  const p = writeChain.then(fn, fn);
+  writeChain = p.catch(() => {});
+  return p;
+}
 function gh(path, opts = {}, accept = 'application/vnd.github+json', token = secrets.githubToken) {
-  const url = `https://api.github.com/repos/${REPO}/contents/${path}` + (opts.method ? '' : `?ref=${BRANCH}`);
+  const url = `https://api.github.com/repos/${REPO}/contents/${path}` + (opts.method ? '' : `?ref=${BRANCH}&_=${Date.now()}`);
   return fetch(url, {
     ...opts, cache: 'no-store',
     headers: { Authorization: `Bearer ${token}`, Accept: accept, 'X-GitHub-Api-Version': '2022-11-28' },
@@ -123,43 +138,92 @@ async function getSha(path, token) {
   if (!r.ok) throw await ghError(r);
   return (await r.json()).sha;
 }
-async function putBin(path, u8, sha, token = secrets.githubToken) {
-  const body = { message: COMMIT_MSG, content: b64e(u8), branch: BRANCH };
-  if (sha) body.sha = sha;
-  const r = await gh(path, { method: 'PUT', body: JSON.stringify(body) }, undefined, token);
-  if (!r.ok) throw await ghError(r);
+// One PUT attempt (inside the write queue). Returns the new blob sha.
+function putOnce(path, u8, sha, token = secrets.githubToken) {
+  return queued(async () => {
+    const body = { message: COMMIT_MSG, content: b64e(u8), branch: BRANCH };
+    if (sha) body.sha = sha;
+    const r = await gh(path, { method: 'PUT', body: JSON.stringify(body) }, undefined, token);
+    if (!r.ok) throw await ghError(r);
+    const newSha = (await r.json()).content?.sha;
+    written.set(path, { sha: newSha, prevSha: sha || null, data: null });
+    return newSha;
+  });
+}
+const isConflict = (e) => e.status === 409 || e.status === 422;
+const backoff = (attempt) => sleep(Math.min(8000, 700 * 2 ** attempt));
+const MAX_TRIES = 7;   // ~30 seconds of waiting in total
+// Overwrite a whole file (uploads, summaries, previews), retrying on conflicts.
+async function putBin(path, u8, _sha, token = secrets.githubToken) {
+  for (let attempt = 0; ; attempt++) {
+    const w = written.get(path);
+    let sha = await getSha(path, token);
+    if (w && sha === w.prevSha) sha = w.sha;   // stale read of a file we just wrote
+    try { return await putOnce(path, u8, sha, token); }
+    catch (e) { if (!isConflict(e) || attempt >= MAX_TRIES - 1) throw e; await backoff(attempt); }
+  }
 }
 async function delBin(path) {
-  const sha = await getSha(path);
-  if (!sha) return;
-  const r = await gh(path, { method: 'DELETE', body: JSON.stringify({ message: COMMIT_MSG, sha, branch: BRANCH }) });
-  if (!r.ok && r.status !== 404) throw await ghError(r);
+  for (let attempt = 0; ; attempt++) {
+    const sha = await getSha(path);
+    if (!sha) return;
+    try {
+      return await queued(async () => {
+        const r = await gh(path, { method: 'DELETE', body: JSON.stringify({ message: COMMIT_MSG, sha, branch: BRANCH }) });
+        if (!r.ok && r.status !== 404) throw await ghError(r);
+        written.delete(path);
+      });
+    } catch (e) { if (!isConflict(e) || attempt >= MAX_TRIES - 1) throw e; await backoff(attempt); }
+  }
 }
 async function loadEnc(path, fallback) {
+  const w = written.get(path);
+  if (canWrite() && w?.data) {   // don't let a stale read undo our own recent write
+    const cur = await readCurrent(path);
+    if (!cur || cur.sha === w.prevSha) return structuredClone(w.data);
+    return cur.data;
+  }
   const bytes = await readBin(path);
   return bytes ? decJson(bytes) : fallback;
 }
 async function putEnc(path, obj) {
-  await putBin(path, await encJson(obj), await getSha(path));
+  await putBin(path, await encJson(obj));
+}
+async function readCurrent(path) {
+  const r = await gh(path, {}, 'application/vnd.github.object+json');
+  if (r.status === 404) return null;
+  if (!r.ok) throw await ghError(r);
+  const j = await r.json();
+  const bytes = j.encoding === 'base64' && j.content ? b64d(j.content.replace(/\s/g, '')) : await readBin(path);
+  return { sha: j.sha, data: await decJson(bytes) };
 }
 // Read-modify-write with retry, so two people editing at once don't overwrite each other.
 async function updateEnc(path, fallback, mutate) {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const r = await gh(path, {}, 'application/vnd.github.object+json');
-    let sha = null, data = structuredClone(fallback);
-    if (r.ok) {
-      const j = await r.json();
-      sha = j.sha;
-      const bytes = j.encoding === 'base64' && j.content ? b64d(j.content.replace(/\s/g, '')) : await readBin(path);
-      data = await decJson(bytes);
-    } else if (r.status !== 404) throw await ghError(r);
+  for (let attempt = 0; ; attempt++) {
+    let cur = await readCurrent(path);
+    const w = written.get(path);
+    if (w?.data && (!cur || cur.sha === w.prevSha)) cur = { sha: w.sha, data: structuredClone(w.data) };  // stale read
+    const data = cur ? cur.data : structuredClone(fallback);
     mutate(data);
-    try { await putBin(path, await encJson(data), sha); return data; }
-    catch (e) { if (e.status === 409 || e.status === 422) continue; throw e; }
+    try {
+      await putOnce(path, await encJson(data), cur?.sha);
+      written.get(path).data = structuredClone(data);
+      return data;
+    } catch (e) {
+      if (!isConflict(e) || attempt >= MAX_TRIES - 1) {
+        throw isConflict(e) ? new Error('Opslaan mislukt: GitHub bleef een conflict melden. Probeer het over een minuut opnieuw.') : e;
+      }
+      await backoff(attempt);
+    }
   }
-  throw new Error('Opslaan mislukt (te veel gelijktijdige wijzigingen). Probeer het opnieuw.');
 }
-const saveManifest = async (mutate) => { mutate(manifest); renderDocs(); manifest = await updateEnc(P.manifest, { docs: [] }, mutate); renderDocs(); };
+// On failure, reload what is really stored, so the screen never shows unsaved changes as saved.
+const saveManifest = async (mutate) => {
+  mutate(manifest); renderDocs();
+  try { manifest = await updateEnc(P.manifest, { docs: [] }, mutate); }
+  catch (e) { try { manifest = await loadEnc(P.manifest, manifest); } catch {} renderDocs(); throw e; }
+  renderDocs();
+};
 const saveTodo = async (mutate) => {
   mutate(todo); renderTodo();
   try { todo = await updateEnc(P.todo, { persons: [], items: [] }, mutate); }
@@ -289,7 +353,7 @@ function renderDocs() {
   const q = $('#doc-filter').value.trim().toLowerCase();
   const docs = [...manifest.docs]
     .sort((a, b) => (b.added || b.modified || 0) - (a.added || a.modified || 0))
-    .filter((d) => !q || [d.title, d.ai?.uitleg, ...(d.ai?.inhoud || [])].join(' ').toLowerCase().includes(q));
+    .filter((d) => !q || [d.title, d.name, d.ai?.uitleg, ...(d.ai?.inhoud || [])].join(' ').toLowerCase().includes(q));
   $('#doc-empty').hidden = manifest.docs.length > 0;
 
   const tiles = $('#doc-tiles'), table = $('#doc-table');
@@ -299,10 +363,107 @@ function renderDocs() {
   updateWriteState($('#view-docs'));
 }
 
+// Editable title. Only doc.title changes; doc.name (the original file name) stays as it is.
+function titleEditor(d, tag) {
+  const wrap = el('div', { class: 'title-wrap' });
+  const stop = (e) => e.stopPropagation();
+  const view = () => wrap.replaceChildren(
+    el(tag, { class: 'title-text', title: `Bestand: ${d.name}` }, d.title),
+    el('button', { class: 'icon-btn', 'data-write': true, disabled: !canWrite(), title: 'Titel wijzigen',
+                   'aria-label': 'Titel wijzigen', onclick: (e) => { stop(e); edit(); } }, '✎'));
+  const edit = () => {
+    const input = el('input', { class: 'title-input', value: d.title, 'aria-label': 'Titel', onclick: stop });
+    const save = async () => {
+      const t = input.value.trim();
+      if (!t || t === d.title) return view();
+      input.disabled = true;
+      try {
+        await saveManifest((m) => { const x = m.docs.find((y) => y.id === d.id); if (x) x.title = t; });
+        toast('Titel aangepast.');
+      } catch (e) { toast('Opslaan mislukt: ' + e.message, true); view(); }
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); save(); }
+      if (e.key === 'Escape') { e.preventDefault(); view(); }
+    });
+    wrap.replaceChildren(input,
+      el('button', { class: 'small', onclick: (e) => { stop(e); save(); } }, 'Opslaan'),
+      el('button', { class: 'ghost small', onclick: (e) => { stop(e); view(); } }, 'Annuleren'));
+    input.focus(); input.select();
+  };
+  view();
+  return wrap;
+}
+
+// ----- first-page previews -----
+// Rendered once, then stored encrypted in vault/thumbs/<id>.bin so later visits are fast.
+const thumbUrls = new Map();   // id -> object URL, or null when no preview is possible
+const thumbQueue = [];
+let thumbRunning = false;
+const thumbObserver = new IntersectionObserver((entries) => {
+  for (const e of entries) if (e.isIntersecting) { thumbObserver.unobserve(e.target); thumbQueue.push(e.target.dataset.id); runThumbs(); }
+}, { rootMargin: '400px' });
+
+function thumbEl(d) {
+  const box = el('button', { class: 'thumb', 'aria-label': `${d.title} openen`, onclick: () => openDoc(d) });
+  box.dataset.id = d.id;
+  if (thumbUrls.has(d.id)) setThumb(box, thumbUrls.get(d.id));
+  else { box.append(el('span', { class: 'spinner' })); thumbObserver.observe(box); }
+  return box;
+}
+function setThumb(box, url) {
+  box.replaceChildren(url ? el('img', { src: url, alt: '' }) : el('span', { class: 'thumb-fallback' }, 'PDF'));
+}
+async function runThumbs() {
+  if (thumbRunning) return;
+  thumbRunning = true;
+  while (thumbQueue.length) {
+    const id = thumbQueue.shift();
+    const d = manifest.docs.find((x) => x.id === id);
+    if (!d || thumbUrls.has(id)) continue;
+    let url = null;
+    try { url = await loadThumb(d); } catch (e) { console.warn('preview', d.title, e); }
+    thumbUrls.set(id, url);
+    for (const b of $$(`.thumb[data-id="${id}"]`)) setThumb(b, url);
+  }
+  thumbRunning = false;
+}
+async function loadThumb(d) {
+  let jpg;
+  const stored = await readBin(P.thumb(d.id)).catch(() => null);
+  if (stored) jpg = await decrypt(stored);
+  else {
+    jpg = await renderThumb(d);
+    if (canWrite()) putBin(P.thumb(d.id), await encrypt(new Uint8Array(jpg))).catch((e) => console.warn('preview opslaan', e));
+  }
+  return URL.createObjectURL(new Blob([jpg], { type: 'image/jpeg' }));
+}
+async function renderThumb(d) {
+  // Decrypt without filling the file cache, so 50 previews don't keep 50 PDFs in memory.
+  let buf = fileCache.get(d.id);
+  if (!buf) {
+    const bytes = await readBin(P.file(d.id));
+    if (!bytes) throw new Error('bestand niet gevonden');
+    buf = await decrypt(bytes);
+  }
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise;
+  try {
+    const page = await pdf.getPage(1);
+    const vp = page.getViewport({ scale: 360 / page.getViewport({ scale: 1 }).width });
+    const c = document.createElement('canvas');
+    c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.8));
+    return blob.arrayBuffer();
+  } finally { pdf.destroy(); }
+}
+
 function docRow(d) {
   const n = d.notes?.length || 0;
   return el('tr', { onclick: () => openDoc(d) },
-    el('td', { class: 'name' }, d.title),
+    el('td', { class: 'name' }, titleEditor(d, 'span')),
     el('td', {}, busy.has(d.id) ? 'Claude is bezig…' : (d.ai?.inhoud || []).join(', ') || '—'),
     el('td', {}, fmtDate(d.added || d.modified)),
     el('td', {}, fmtSize(d.size)),
@@ -311,11 +472,13 @@ function docRow(d) {
 
 function docTile(d) {
   const ai = d.ai, isPdf = d.ext === 'pdf', notes = d.notes || [];
-  const tile = el('article', { class: 'doc-tile' },
+  const fileTitle = d.name.replace(/\.[^.]+$/, '');
+  const tile = el('div', { class: 'tile-main' },
     el('header', {},
       el('div', { style: 'flex:1;min-width:200px' },
-        el('h3', {}, d.title),
-        el('div', { class: 'meta' }, `${d.ext.toUpperCase()} · ${fmtSize(d.size)} · toegevoegd ${fmtDate(d.added || d.modified)}`)),
+        titleEditor(d, 'h3'),
+        el('div', { class: 'meta' }, `${d.ext.toUpperCase()} · ${fmtSize(d.size)} · toegevoegd ${fmtDate(d.added || d.modified)}`,
+          d.title !== fileTitle ? ` · bestand: ${d.name}` : '')),
       el('div', { class: 'actions' },
         el('button', { class: 'ghost small', onclick: () => openDoc(d) }, 'Openen'),
         el('button', { class: 'ghost small', 'data-write': true, onclick: () => noteDialog(d) }, '+ Notitie'),
@@ -342,7 +505,7 @@ function docTile(d) {
     tile.append(el('div', { class: 'tile-foot' },
       el('button', { class: 'linkish', onclick: () => openSummary(d) }, `📝 ${notes.length} ${notes.length === 1 ? 'notitie' : 'notities'}`)));
   }
-  return tile;
+  return el('article', { class: 'doc-tile' + (isPdf ? ' has-thumb' : '') }, isPdf && thumbEl(d), tile);
 }
 
 let viewerToken = 0;
@@ -457,6 +620,7 @@ async function deleteDoc(d) {
   try {
     await delBin(P.file(d.id));
     await delBin(P.summary(d.id));
+    await delBin(P.thumb(d.id));
     await saveManifest((m) => { m.docs = m.docs.filter((x) => x.id !== d.id); });
     fileCache.delete(d.id); summaryCache.delete(d.id);
     toast('Document verwijderd.');
@@ -488,9 +652,13 @@ $('#add-pdf').addEventListener('click', () => {
         if (bytes.length > 90e6) throw new Error('te groot (max 90 MB)');
         const id = await docId(bytes);
         if (manifest.docs.some((x) => x.id === id)) { li.textContent = `${f.name}: staat er al`; continue; }
-        const enc = await encrypt(bytes);
-        li.textContent = `${f.name}: uploaden…`;
-        await putBin(P.file(id), enc, await getSha(P.file(id)));
+        if (await getSha(P.file(id))) {
+          li.textContent = `${f.name}: stond al in de kluis, wordt weer aan de lijst toegevoegd…`;
+        } else {
+          const enc = await encrypt(bytes);
+          li.textContent = `${f.name}: uploaden…`;
+          await putBin(P.file(id), enc);
+        }
         const doc = { id, name: f.name, title: f.name.replace(/\.[^.]+$/, ''), ext: 'pdf', mime: 'application/pdf',
                       size: f.size, added: Date.now(), notes: [] };
         await saveManifest((m) => { if (!m.docs.some((x) => x.id === id)) m.docs.push(doc); });
