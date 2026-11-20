@@ -7,6 +7,8 @@
   <title>TweedeDijk</title>
   <link rel="stylesheet" href="app.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
 </head>
 <body>
   <!-- Login -->
@@ -29,23 +31,37 @@
   <div id="app" class="app" hidden>
     <header class="topbar">
       <span class="brand">TweedeDijk</span>
-      <nav>
+      <nav id="tabs">
         <button data-view="docs" class="active">Documenten</button>
-        <button data-view="analyse">Analyse</button>
-        <button data-view="notes">Notities</button>
+        <button data-view="todo">To-do</button>
+        <button data-view="constructie">Constructie</button>
+        <button data-view="planning">Planning</button>
       </nav>
+      <button id="settings-btn" class="ghost" title="Instellingen">⚙ Instellingen</button>
       <button id="logout" class="ghost">Uitloggen</button>
     </header>
+    <div id="readonly-banner" class="banner" hidden>
+      Alleen-lezen: er is nog geen GitHub-token ingesteld, dus uploaden en opslaan werkt nog niet.
+      <button class="linkish" data-open-settings>Instellingen openen</button>
+    </div>
 
     <main>
-      <!-- Documents -->
+      <!-- Documenten -->
       <section id="view-docs" class="view">
         <div class="toolbar">
-          <input id="doc-filter" type="search" placeholder="Zoek op naam…">
-          <div id="cats" class="chips"></div>
+          <input id="doc-filter" type="search" placeholder="Zoek op naam of inhoud…">
+          <div class="segmented" role="group" aria-label="Weergave">
+            <button data-layout="tiles">Tegels</button>
+            <button data-layout="list">Lijst</button>
+          </div>
+          <button id="add-pdf" data-write>+ PDF toevoegen</button>
         </div>
-        <p id="doc-empty" class="muted" hidden>Nog geen documenten. Zet bestanden in de map <code>private/</code> en draai <code>node tools/encrypt.mjs</code>.</p>
-        <ul id="doc-list" class="doc-list"></ul>
+        <p id="doc-empty" class="empty" hidden>Nog geen documenten. Klik op <b>+ PDF toevoegen</b>.</p>
+        <div id="doc-tiles" class="tiles-wide"></div>
+        <table id="doc-table" class="table" hidden>
+          <thead><tr><th>Naam</th><th>Inhoud</th><th>Toegevoegd</th><th>Grootte</th><th>Notities</th></tr></thead>
+          <tbody></tbody>
+        </table>
       </section>
 
       <!-- Viewer -->
@@ -58,41 +74,48 @@
         <div id="viewer-body" class="viewer-body"></div>
       </section>
 
-      <!-- Analyse -->
-      <section id="view-analyse" class="view" hidden>
+      <!-- To-do -->
+      <section id="view-todo" class="view" hidden>
+        <form id="todo-form" class="card todo-form">
+          <input id="todo-title" placeholder="Nieuwe taak…" required>
+          <select id="todo-person" aria-label="Persoon"></select>
+          <input id="todo-deadline" type="date" aria-label="Deadline">
+          <select id="todo-importance" aria-label="Belangrijkheid">
+            <option value="3">Hoog</option>
+            <option value="2" selected>Normaal</option>
+            <option value="1">Laag</option>
+          </select>
+          <button type="submit" data-write>Toevoegen</button>
+        </form>
         <div class="toolbar">
-          <button id="run-analyse">Analyseer alle PDF's</button>
-          <progress id="analyse-progress" value="0" max="1" hidden></progress>
-          <span id="analyse-status" class="muted"></span>
+          <label class="inline">Sorteren op
+            <select id="todo-sort">
+              <option value="urgency">Urgentie (deadline)</option>
+              <option value="importance">Belangrijkheid</option>
+            </select>
+          </label>
+          <label class="inline">Persoon
+            <select id="todo-filter"></select>
+          </label>
+          <label class="inline check"><input id="todo-show-done" type="checkbox"> Afgeronde taken tonen</label>
+          <button id="manage-persons" class="ghost">Personen beheren</button>
         </div>
-        <div id="analyse-results" hidden>
-          <div class="tiles">
-            <div class="tile"><span id="t-docs">0</span><small>documenten</small></div>
-            <div class="tile"><span id="t-pages">0</span><small>pagina's</small></div>
-            <div class="tile"><span id="t-words">0</span><small>woorden</small></div>
-          </div>
-          <h2>Zoeken in tekst</h2>
-          <input id="fulltext" type="search" placeholder="Zoek in alle PDF's…">
-          <ul id="hits" class="hits"></ul>
-          <h2>Per document</h2>
-          <table class="table"><thead><tr><th>Document</th><th>Pagina's</th><th>Woorden</th></tr></thead><tbody id="per-doc"></tbody></table>
-          <h2>Meest gebruikte woorden</h2>
-          <div id="terms" class="terms"></div>
-        </div>
+        <ul id="todo-list" class="todo-list"></ul>
+        <p id="todo-empty" class="empty" hidden>Geen taken.</p>
       </section>
 
-      <!-- Notes -->
-      <section id="view-notes" class="view" hidden>
-        <p class="muted">Notities worden alleen in deze browser bewaard (niet gedeeld).</p>
-        <form id="note-form" class="note-form">
-          <textarea id="note-text" rows="3" placeholder="Nieuwe notitie…" required></textarea>
-          <button type="submit">Opslaan</button>
-        </form>
-        <ul id="notes" class="notes"></ul>
+      <section id="view-constructie" class="view" hidden>
+        <p class="empty">Constructie — nog leeg.</p>
+      </section>
+      <section id="view-planning" class="view" hidden>
+        <p class="empty">Planning — nog leeg.</p>
       </section>
     </main>
   </div>
 
-  <script src="app.js"></script>
+  <dialog id="modal"><div class="modal-inner"></div></dialog>
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="app.js"></script>
 </body>
 </html>

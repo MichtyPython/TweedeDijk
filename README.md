@@ -1,25 +1,35 @@
 # TweedeDijk
 
-Private document site with a login screen, hosted on GitHub Pages.
+Private group site on GitHub Pages: https://michtypython.github.io/TweedeDijk/
 
-Every document is **encrypted in your browser's format (AES-256-GCM)** with a key derived from
-username + password. The repo only contains encrypted files (`vault/`); the originals stay on
-your PC in `private/` (git-ignored). Without the login, the files are unreadable — even though
-the repo is public.
+Tabs: **Documenten** (PDFs with Claude summaries and notes), **To-do**, **Constructie**, **Planning**.
+
+## How the protection works
+
+All data lives in `vault/` and is encrypted (AES-256-GCM) with a key derived from the
+username + password. The repo is public, but without the login it only contains unreadable
+files. The Claude API key and the GitHub token are stored the same way (`vault/secrets.bin`),
+so everybody who can log in can upload and generate summaries.
+
+Commit messages are always just "Update vault", so they never reveal document names.
+
+## One-time setup (in the site: ⚙ Instellingen)
+
+1. **Claude API key**: console.anthropic.com → Billing (add credit) → API keys → Create key.
+   This is separate from a claude.ai Pro/Max subscription.
+2. **GitHub token**: github.com → Settings → Developer settings → Fine-grained tokens →
+   Generate new token. Repository access: *Only select repositories* → `TweedeDijk`.
+   Permissions: *Contents: Read and write*.
 
 ## Adding documents
 
-1. Put files in `C:\TweedeDijk\private\` (subfolders become categories, e.g. `private\Notulen\`).
-2. Run: `node tools/encrypt.mjs` and enter the username + password.
-3. Publish: `git add -A`, `git commit -m "Documenten bijgewerkt"`, `git push`.
+Use **+ PDF toevoegen** on the site. For bulk imports from this PC:
 
-The site updates within a minute or two.
+1. `git pull` (the website commits too)
+2. Put files in `private\` (git-ignored, never uploaded unencrypted)
+3. `node tools/encrypt.mjs` and enter the login
+4. `git add -A`, `git commit -m "Update vault"`, `git push`
 
 ## Testing locally
 
-`python -m http.server 8000` in this folder, then open http://localhost:8000
-(opening index.html directly as a file does not work).
-
-## Changing the password
-
-`node tools/encrypt.mjs --reset` re-encrypts everything with new credentials.
+`python -m http.server 8000` in this folder, then open http://localhost:8000.

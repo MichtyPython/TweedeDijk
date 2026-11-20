@@ -3,8 +3,8 @@
 //   node tools/encrypt.mjs
 //
 // Asks for username + password (or reads VAULT_USER / VAULT_PASS).
-// Subfolders of private/ become categories on the site.
-// Unchanged files are not re-encrypted; deleted files are removed from vault/.
+// Adds every file in private/ that is not yet on the site. Documents added through the
+// website are kept. Run `git pull` first, because the website commits to the repo too.
 // The private/ folder is git-ignored: only encrypted files ever reach GitHub.
 
 import { webcrypto as crypto, createHmac, createHash } from 'node:crypto';
@@ -72,34 +72,32 @@ async function walk(dir, rel = '') {
   return out;
 }
 
-const reset = process.argv.includes('--reset');
 await fs.mkdir(FILES, { recursive: true });
 await fs.mkdir(SRC, { recursive: true });
 
 let cfg;
-if (!reset && await exists(CFG)) {
+if (await exists(CFG)) {
   cfg = JSON.parse(await fs.readFile(CFG, 'utf8'));
 } else {
   cfg = { v: 1, kdf: 'PBKDF2-SHA256', iterations: ITERATIONS,
           salt: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64') };
-  if (reset) for (const f of await fs.readdir(FILES)) await fs.unlink(path.join(FILES, f));
 }
 
 const { user, pass } = await credentials();
 const key = await deriveKey(user, pass, cfg);
 
-// Guard against typos: the password must open the existing vault.
-if (!reset && await exists(MANIFEST)) {
-  try { await decrypt(key, await fs.readFile(MANIFEST)); }
+// The password must open the existing vault (guards against typos).
+let manifest = { docs: [] };
+if (await exists(MANIFEST)) {
+  try { manifest = JSON.parse(Buffer.from(await decrypt(key, await fs.readFile(MANIFEST))).toString('utf8')); }
   catch {
-    console.error('Gebruikersnaam/wachtwoord komt niet overeen met de bestaande kluis.\n' +
-                  'Gebruik --reset om alles opnieuw te versleutelen met nieuwe inloggegevens.');
+    console.error('Gebruikersnaam/wachtwoord komt niet overeen met de bestaande kluis.');
     process.exit(1);
   }
 }
 
+// Additive import: documents added on the website (and their notes/summaries) are kept.
 const rawKey = Buffer.from(await crypto.subtle.exportKey('raw', key));
-const docs = [], keep = new Set();
 let added = 0;
 
 for (const f of (await walk(SRC)).sort((a, b) => a.rel.localeCompare(b.rel))) {
@@ -107,27 +105,22 @@ for (const f of (await walk(SRC)).sort((a, b) => a.rel.localeCompare(b.rel))) {
   const stat = await fs.stat(f.full);
   const hash = createHash('sha256').update(data).digest();
   const id = createHmac('sha256', rawKey).update(hash).digest('hex').slice(0, 32);
-  const out = path.join(FILES, `${id}.bin`);
-  if (!(await exists(out))) { await fs.writeFile(out, await encrypt(key, data)); added++; }
-  keep.add(`${id}.bin`);
-
+  if (manifest.docs.some((d) => d.id === id)) continue;
+  await fs.writeFile(path.join(FILES, `${id}.bin`), await encrypt(key, data));
   const name = path.basename(f.rel), ext = path.extname(name).slice(1).toLowerCase();
-  const dir = path.dirname(f.rel);
-  docs.push({
+  manifest.docs.push({
     id, name, ext,
     title: name.replace(/\.[^.]+$/, ''),
-    category: dir === '.' ? 'Algemeen' : dir,
     mime: MIME[ext] || 'application/octet-stream',
     size: stat.size,
-    modified: stat.mtimeMs,
+    added: Date.now(),
+    notes: [],
   });
+  added++;
 }
 
-let removed = 0;
-for (const f of await fs.readdir(FILES)) if (!keep.has(f)) { await fs.unlink(path.join(FILES, f)); removed++; }
-
-await fs.writeFile(MANIFEST, await encrypt(key, Buffer.from(JSON.stringify({ generated: Date.now(), docs }))));
+await fs.writeFile(MANIFEST, await encrypt(key, Buffer.from(JSON.stringify(manifest))));
 await fs.writeFile(CFG, JSON.stringify(cfg, null, 2) + '\n');
 
-console.log(`Klaar: ${docs.length} documenten (${added} nieuw versleuteld, ${removed} verwijderd).`);
-console.log('Volgende stap: git add -A && git commit -m "Documenten bijgewerkt" && git push');
+console.log(`Klaar: ${added} nieuwe documenten toegevoegd (${manifest.docs.length} in totaal).`);
+console.log('Volgende stap: git add -A && git commit -m "Update vault" && git push');
