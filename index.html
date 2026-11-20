@@ -4,17 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0910">
   <title>TweedeDijk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="app.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
 </head>
 <body>
+  <div class="backdrop" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span><span class="orb orb-c"></span></div>
   <!-- Login -->
   <section id="login" class="login">
+    <div class="login-globe" aria-hidden="true"></div>
     <form id="login-form" class="login-card" autocomplete="on">
-      <h1>TweedeDijk</h1>
+      <h1 class="gradient-text">TweedeDijk</h1>
       <p class="muted">Log in om verder te gaan</p>
       <label>Gebruikersnaam
         <input id="user" name="username" autocomplete="username" required>
@@ -30,14 +37,14 @@
   <!-- App -->
   <div id="app" class="app" hidden>
     <header class="topbar">
-      <span class="brand">TweedeDijk</span>
+      <span class="brand"><span class="brand-dot" aria-hidden="true"></span><span class="gradient-text">TweedeDijk</span></span>
       <nav id="tabs">
         <button data-view="docs" class="active">Documenten</button>
         <button data-view="todo">To-do</button>
         <button data-view="constructie">Constructie</button>
         <button data-view="planning">Planning</button>
       </nav>
-      <button id="settings-btn" class="ghost" title="Instellingen">⚙ Instellingen</button>
+      <button id="settings-btn" class="ghost" title="Instellingen" aria-label="Instellingen">⚙<span class="btn-label"> Instellingen</span></button>
       <button id="logout" class="ghost">Uitloggen</button>
     </header>
     <div id="readonly-banner" class="banner" hidden>
@@ -105,10 +112,10 @@
       </section>
 
       <section id="view-constructie" class="view" hidden>
-        <p class="empty">Constructie — nog leeg.</p>
+        <div class="placeholder"><h2 class="gradient-text">Constructie</h2><p class="muted">Hier komt binnenkort meer.</p></div>
       </section>
       <section id="view-planning" class="view" hidden>
-        <p class="empty">Planning — nog leeg.</p>
+        <div class="placeholder"><h2 class="gradient-text">Planning</h2><p class="muted">Hier komt binnenkort meer.</p></div>
       </section>
     </main>
   </div>

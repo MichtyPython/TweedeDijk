@@ -492,9 +492,7 @@ function docTile(d) {
       isPdf && el('button', { class: 'linkish', 'data-write': true, onclick: () => refreshDialog(d) }, 'Laat Claude samenvatten')));
   } else {
     tile.append(
-      el('div', {}, el('div', { class: 'field-label' }, 'Inhoud'),
-        el('div', { class: 'keywords' }, (ai.inhoud || []).map((w) => el('span', {}, w)))),
-      el('div', {}, el('div', { class: 'field-label' }, 'Wat is het'), el('div', {}, ai.uitleg)),
+      el('div', {}, el('div', { class: 'field-label' }, 'Wat is het'), el('div', { class: 'uitleg' }, ai.uitleg)),
       el('div', { class: 'summary-box', role: 'button', tabindex: '0', onclick: () => openSummary(d),
                   onkeydown: (e) => { if (e.key === 'Enter') openSummary(d); } },
         el('div', { class: 'field-label' }, 'Samenvatting'),
