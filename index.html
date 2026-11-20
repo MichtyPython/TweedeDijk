@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>TweedeDijk</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+<body>
+  <!-- Login -->
+  <section id="login" class="login">
+    <form id="login-form" class="login-card" autocomplete="on">
+      <h1>TweedeDijk</h1>
+      <p class="muted">Log in om verder te gaan</p>
+      <label>Gebruikersnaam
+        <input id="user" name="username" autocomplete="username" required>
+      </label>
+      <label>Wachtwoord
+        <input id="pass" name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button id="login-btn" type="submit">Inloggen</button>
+      <p id="login-error" class="error" hidden></p>
+    </form>
+  </section>
+
+  <!-- App -->
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <span class="brand">TweedeDijk</span>
+      <nav>
+        <button data-view="docs" class="active">Documenten</button>
+        <button data-view="analyse">Analyse</button>
+        <button data-view="notes">Notities</button>
+      </nav>
+      <button id="logout" class="ghost">Uitloggen</button>
+    </header>
+
+    <main>
+      <!-- Documents -->
+      <section id="view-docs" class="view">
+        <div class="toolbar">
+          <input id="doc-filter" type="search" placeholder="Zoek op naam…">
+          <div id="cats" class="chips"></div>
+        </div>
+        <p id="doc-empty" class="muted" hidden>Nog geen documenten. Zet bestanden in de map <code>private/</code> en draai <code>node tools/encrypt.mjs</code>.</p>
+        <ul id="doc-list" class="doc-list"></ul>
+      </section>
+
+      <!-- Viewer -->
+      <section id="view-viewer" class="view" hidden>
+        <div class="toolbar">
+          <button id="back" class="ghost">← Terug</button>
+          <strong id="viewer-title"></strong>
+          <a id="download" class="button" download>Download</a>
+        </div>
+        <div id="viewer-body" class="viewer-body"></div>
+      </section>
+
+      <!-- Analyse -->
+      <section id="view-analyse" class="view" hidden>
+        <div class="toolbar">
+          <button id="run-analyse">Analyseer alle PDF's</button>
+          <progress id="analyse-progress" value="0" max="1" hidden></progress>
+          <span id="analyse-status" class="muted"></span>
+        </div>
+        <div id="analyse-results" hidden>
+          <div class="tiles">
+            <div class="tile"><span id="t-docs">0</span><small>documenten</small></div>
+            <div class="tile"><span id="t-pages">0</span><small>pagina's</small></div>
+            <div class="tile"><span id="t-words">0</span><small>woorden</small></div>
+          </div>
+          <h2>Zoeken in tekst</h2>
+          <input id="fulltext" type="search" placeholder="Zoek in alle PDF's…">
+          <ul id="hits" class="hits"></ul>
+          <h2>Per document</h2>
+          <table class="table"><thead><tr><th>Document</th><th>Pagina's</th><th>Woorden</th></tr></thead><tbody id="per-doc"></tbody></table>
+          <h2>Meest gebruikte woorden</h2>
+          <div id="terms" class="terms"></div>
+        </div>
+      </section>
+
+      <!-- Notes -->
+      <section id="view-notes" class="view" hidden>
+        <p class="muted">Notities worden alleen in deze browser bewaard (niet gedeeld).</p>
+        <form id="note-form" class="note-form">
+          <textarea id="note-text" rows="3" placeholder="Nieuwe notitie…" required></textarea>
+          <button type="submit">Opslaan</button>
+        </form>
+        <ul id="notes" class="notes"></ul>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
