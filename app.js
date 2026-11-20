@@ -789,6 +789,36 @@ function refreshDialog(d) {
   instr.focus();
 }
 
+// ---------- themes (per browser; not stored in the vault) ----------
+const THEMES = [
+  { id: 'calm', name: 'Kalm', desc: 'Rustig donkergrijs met een blauw accent' },
+  { id: 'neon', name: 'Neon', desc: 'Donker met roze en paarse gloed' },
+  { id: 'light', name: 'Licht', desc: 'Licht en zakelijk' },
+];
+const THEME_COLOR = { calm: '#17181b', neon: '#0b0910', light: '#f5f6f8' };
+function applyTheme(id) {
+  if (!THEMES.some((t) => t.id === id)) id = 'calm';
+  document.documentElement.dataset.theme = id;
+  $('meta[name=theme-color]')?.setAttribute('content', THEME_COLOR[id]);
+  pref.set('theme', id);
+  for (const b of $$('.theme-option')) b.classList.toggle('active', b.dataset.themeOption === id);
+}
+applyTheme(document.documentElement.dataset.theme || pref.get('theme', 'calm'));
+
+function themePicker() {
+  const current = document.documentElement.dataset.theme;
+  return el('div', { class: 'theme-picker', role: 'radiogroup', 'aria-label': 'Weergave' },
+    THEMES.map((t) => {
+      const b = el('button', { type: 'button', class: 'theme-option' + (t.id === current ? ' active' : ''), role: 'radio',
+                               onclick: () => { applyTheme(t.id); for (const x of $$('.theme-option')) x.setAttribute('aria-checked', String(x.dataset.themeOption === t.id)); } },
+        el('span', { class: `swatch swatch-${t.id}`, 'aria-hidden': 'true' }, el('i'), el('i'), el('i')),
+        el('span', { class: 'theme-text' }, el('b', {}, t.name), el('small', {}, t.desc)));
+      b.dataset.themeOption = t.id;
+      b.setAttribute('aria-checked', String(t.id === current));
+      return b;
+    }));
+}
+
 // ---------- settings ----------
 for (const b of [$('#settings-btn'), ...$$('[data-open-settings]')]) b.addEventListener('click', openSettings);
 function openSettings() {
@@ -796,6 +826,8 @@ function openSettings() {
   const gt = el('input', { type: 'password', autocomplete: 'off', placeholder: secrets.githubToken ? 'Ingesteld ✓ (laat leeg om te behouden)' : 'github_pat_…' });
   const save = el('button', {}, 'Opslaan');
   save.addEventListener('click', async () => {
+    // Nothing typed: only the look changed (already applied), so don't rewrite the stored keys.
+    if (!ak.value.trim() && !gt.value.trim()) { closeModal(); return; }
     const next = { ...secrets };
     if (ak.value.trim()) next.anthropicKey = ak.value.trim();
     if (gt.value.trim()) next.githubToken = gt.value.trim();
@@ -815,12 +847,16 @@ function openSettings() {
   openModal({
     title: 'Instellingen',
     body: [
+      el('div', { class: 'field-label' }, 'Weergave'),
+      themePicker(),
+      el('p', { class: 'hint' }, 'Wordt direct toegepast en alleen in deze browser onthouden.'),
+      el('div', { class: 'field-label', style: 'margin-top:.5rem' }, 'Sleutels'),
       el('label', {}, 'Claude API-sleutel', ak),
       el('p', { class: 'hint' }, 'Maak een sleutel op console.anthropic.com → API keys. Kosten gaan via het tegoed van dat account.'),
       el('label', {}, 'GitHub-token (fine-grained, alleen deze repo, Contents: read & write)', gt),
       el('p', { class: 'hint' }, 'Beide worden versleuteld met de inloggegevens opgeslagen, zodat iedereen die kan inloggen ze kan gebruiken.'),
     ],
-    actions: [el('button', { class: 'ghost', onclick: closeModal }, 'Annuleren'), save],
+    actions: [el('button', { class: 'ghost', onclick: closeModal }, 'Sluiten'), save],
   });
 }
 

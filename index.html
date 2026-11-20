@@ -4,12 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#0b0910">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#17181b">
   <title>TweedeDijk</title>
+  <script>
+    // Apply the chosen look before anything is drawn (no flash). Default: calm.
+    (function () { var t = 'calm'; try { t = localStorage.getItem('td-theme') || 'calm'; } catch (e) {}
+      if (['calm', 'neon', 'light'].indexOf(t) < 0) t = 'calm';
+      document.documentElement.dataset.theme = t; })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="app.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
